@@ -45,15 +45,10 @@ public class DataGenerator {
 
             AvroDataWriter avroDataWriter = new AvroDataWriter(batchSize);
             CodecFactory codec = CodecFactory.bzip2Codec();
-            avroDataWriter.writeDataToAvroInParallel(conn, metadata, schema, tableName, avroDataPath, codec);
+            avroDataWriter.writeDataToAvro(conn, metadata, schema, tableName, avroDataPath, codec);
 
         } catch (Exception e) {
             e.printStackTrace();
         }
-    }
-
-    public  void initializeProcess() {
-        DataGenerator generator = new DataGenerator("jdbc:postgresql://localhost:5432/ads", "adsuser", "AdS@3421", "ads_app_columns", "/path/to/metadata.json", "/path/to/data.avro", 1000);
-        generator.execute();
     }
 }

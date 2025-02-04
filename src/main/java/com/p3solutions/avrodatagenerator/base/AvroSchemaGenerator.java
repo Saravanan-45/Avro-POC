@@ -54,8 +54,20 @@ public class AvroSchemaGenerator {
                 return Schema.create(Schema.Type.FLOAT);
             case "double":
                 return Schema.create(Schema.Type.DOUBLE);
+            case "json":
+            case "jsonb":
+                return Schema.create(Schema.Type.STRING);
+            case "interval":
+                return Schema.create(Schema.Type.STRING);
+            case "array":
+                return Schema.createArray(Schema.create(Schema.Type.STRING));
+            case "composite":
+                return Schema.createRecord("CompositeType", null, null, false);
+            case "range":
+                return Schema.createRecord("RangeType", null, null, false);
             default:
                 return Schema.create(Schema.Type.STRING);
         }
     }
+
 }

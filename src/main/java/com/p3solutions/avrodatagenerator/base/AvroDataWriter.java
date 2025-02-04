@@ -7,12 +7,12 @@ import org.apache.avro.generic.GenericData;
 import org.apache.avro.generic.GenericDatumWriter;
 import org.apache.avro.generic.GenericRecord;
 
+import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.sql.*;
 import java.nio.ByteBuffer;
 import java.util.*;
-import java.util.concurrent.*;
 
 public class AvroDataWriter {
 
@@ -22,14 +22,22 @@ public class AvroDataWriter {
         this.batchSize = batchSize;
     }
 
-    public void writeDataToAvroInParallel(Connection conn, List<Map<String, String>> metadata, Schema schema, String tableName, String filePath, CodecFactory codec) throws SQLException, IOException, InterruptedException, ExecutionException {
+    public void writeDataToAvro(Connection conn, List<Map<String, String>> metadata, Schema schema, String tableName, String filePath, CodecFactory codec) throws SQLException, IOException {
         String query = "SELECT * FROM " + tableName;
 
-        ExecutorService executorService = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
-        List<Future<Void>> futures = new ArrayList<>();
+        File file = new File(filePath);
+        boolean fileExists = file.exists();
 
         try (Statement stmt = conn.createStatement();
-             ResultSet dataResultSet = stmt.executeQuery(query)) {
+             ResultSet dataResultSet = stmt.executeQuery(query);
+             FileOutputStream fileOutputStream = new FileOutputStream(filePath, false);
+             DataFileWriter<GenericRecord> dataFileWriter = new DataFileWriter<>(new GenericDatumWriter<>(schema))) {
+
+            dataFileWriter.setCodec(codec);
+
+            if (!fileExists || file.length() == 0) {
+                dataFileWriter.create(schema, fileOutputStream);
+            }
 
             List<GenericRecord> batch = new ArrayList<>();
 
@@ -45,79 +53,71 @@ public class AvroDataWriter {
                 batch.add(record);
 
                 if (batch.size() >= batchSize) {
-                    futures.add(executorService.submit(new BatchWriter(batch, filePath, schema, codec)));
-                    batch = new ArrayList<>();
+                    for (GenericRecord rec : batch) {
+                        dataFileWriter.append(rec);
+                    }
+                    batch.clear();
                 }
             }
 
             if (!batch.isEmpty()) {
-                futures.add(executorService.submit(new BatchWriter(batch, filePath, schema, codec)));
-            }
-
-            for (Future<Void> future : futures) {
-                future.get();
-            }
-
-        } finally {
-            executorService.shutdown();
-        }
-    }
-
-    private static class BatchWriter implements Callable<Void> {
-        private final List<GenericRecord> batch;
-        private final String filePath;
-        private final Schema schema;
-        private final CodecFactory codec;
-
-        public BatchWriter(List<GenericRecord> batch, String filePath, Schema schema, CodecFactory codec) {
-            this.batch = batch;
-            this.filePath = filePath;
-            this.schema = schema;
-            this.codec = codec;
-        }
-
-        @Override
-        public Void call() throws Exception {
-            try (FileOutputStream fileOutputStream = new FileOutputStream(filePath, true);  // Append mode
-                 DataFileWriter<GenericRecord> dataFileWriter = new DataFileWriter<>(new GenericDatumWriter<>(schema))) {
-
-                dataFileWriter.setCodec(codec);
-                if (fileOutputStream.getChannel().position() == 0) {
-                    dataFileWriter.create(schema, fileOutputStream);
-                }
-
-                for (GenericRecord record : batch) {
-                    dataFileWriter.append(record);
+                for (GenericRecord rec : batch) {
+                    dataFileWriter.append(rec);
                 }
             }
-            return null;
+
+        } catch (IOException | SQLException e) {
+            e.printStackTrace();
+            throw e;
         }
+
+
     }
+
 
     private static Object convertToAvro(Object value, String dataType) {
+        if (value == null) {
+            return null;
+        }
+
         switch (dataType) {
             case "timestamp":
             case "timestamp without time zone":
                 return ((java.sql.Timestamp) value).getTime();
+
             case "boolean":
+                return ((Boolean) value);
+
             case "integer":
             case "bigint":
-            case "numeric":
                 return value;
+
+            case "numeric":
+                if (value instanceof java.math.BigDecimal) {
+                    return ((java.math.BigDecimal) value).doubleValue();
+                }
+                return value;
+
             case "bytea":
                 return ByteBuffer.wrap((byte[]) value);
+
             case "date":
                 return ((java.sql.Date) value).toLocalDate().toEpochDay();
+
             case "character varying":
             case "text":
                 return value.toString();
+
             case "uuid":
                 return value.toString();
+
             case "float":
             case "double":
                 return value;
+
             default:
                 return value.toString();
         }
     }
+
 }
